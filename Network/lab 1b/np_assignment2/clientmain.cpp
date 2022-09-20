@@ -30,7 +30,56 @@ void HandleError(int e, std::string errorMSG){
     exit(e);
   }
 }
-
+//char *arith[]={"add","div","mul","sub","fadd","fdiv","fmul","fsub"};
+struct results{
+  int theOperator;
+  double floatRes;
+  int intRes;
+  bool intResultat;
+  int iValue1;
+  int iValue2;
+  double fValue1;
+  double fValue2;
+};
+void calculate(results &res){
+  switch (res.theOperator)
+  {
+  case 1:
+    res.intResultat = true;
+    res.intRes = res.iValue1 + res.iValue2;
+    break;
+  case 2:
+    res.intResultat = true;
+    res.intRes = res.iValue1 / res.iValue2;
+    break;
+  case 3:
+    res.intResultat = true;
+    res.intRes = res.iValue1 * res.iValue2;
+    break;
+  case 4:
+    res.intResultat = true;
+    res.intRes = res.iValue1 - res.iValue2;
+    break;
+  case 5:
+    res.intResultat = false;
+    res.floatRes = res.fValue1 + res.fValue2;
+    break;
+  case 6:
+    res.intResultat = false;
+    res.floatRes = res.fValue1 / res.fValue2;
+    break;
+  case 7:
+    res.intResultat = false;
+    res.floatRes = res.fValue1 * res.fValue2;
+    break;
+  case 8:
+    res.intResultat = false;
+    res.floatRes = res.fValue1 - res.fValue2;
+    break;
+  default:
+    break;
+  }
+}
 
 int main(int argc, char *argv[]){
   
@@ -74,11 +123,11 @@ int main(int argc, char *argv[]){
 
   //give buffer data som data
   calcMessage SendCalcMessage;
-  SendCalcMessage.type = 22;
-  SendCalcMessage.message = 0;
-  SendCalcMessage.protocol = 17;
-  SendCalcMessage.major_version = 1;
-  SendCalcMessage.minor_version = 0;
+  SendCalcMessage.type = htons(22);
+  SendCalcMessage.message = htons(0);
+  SendCalcMessage.protocol = htons(17);
+  SendCalcMessage.major_version = htons(1);
+  SendCalcMessage.minor_version = htons(0);
 
   std::cout << "sending data to server" << std::endl;
   sizeOfSend = sendto(sock, &SendCalcMessage, sizeof(SendCalcMessage), 0, (sockaddr*)&serverAddr, sizeof(serverAddr));
@@ -88,23 +137,26 @@ int main(int argc, char *argv[]){
 
   calcProtocol *recvCalcProtocol = new calcProtocol;
   calcMessage *recvCalcMessage = new calcMessage;
-  void* p_struct = malloc(sizeof(calcMessage));
+  void* p_struct = malloc(sizeof(calcProtocol));
   size_t size = sizeof(recvCalcProtocol);
   
-  sizeOfRecv = recvfrom(sock, p_struct, sizeof(calcMessage), MSG_WAITALL, (sockaddr*)&serverAddr, &cLen);
-  HandleError(sizeOfSend, "we can't recv");
+  sizeOfRecv = recvfrom(sock, p_struct, sizeof(calcProtocol), 0, (sockaddr*)&serverAddr, &cLen);
+  HandleError(sizeOfRecv, "we can't recv");
 
   if(sizeOfRecv == sizeof(calcProtocol)){
-    std::cout << "got a calcProtocol" << std::endl;
+    std::cout << "got a calcProtocol LETS GOOO!!!" << std::endl;
   }
   else if(sizeOfRecv == sizeof(calcMessage)){
     std::cout << "got calcMessage" << std::endl;
     recvCalcMessage = (calcMessage*)p_struct;
-    std::cout << "message says: " << recvCalcMessage->message << std::endl;
-    std::cout << "type says: "<< recvCalcMessage->type << std::endl;
+    std::cout << "message says: " << ntohs(recvCalcMessage->message) << std::endl;
+    std::cout << "type says: "<< ntohs(recvCalcMessage->type) << std::endl;
+    return -1;
   }
 
   recvCalcProtocol = (calcProtocol*)p_struct;
+
+
 
     std::cout << recvCalcProtocol->inValue1 << recvCalcProtocol->flValue1 << recvCalcProtocol->arith <<
     recvCalcProtocol->inValue2 << recvCalcProtocol->flValue2 << std::endl;
