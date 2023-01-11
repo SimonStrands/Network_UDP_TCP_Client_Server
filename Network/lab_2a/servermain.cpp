@@ -233,7 +233,7 @@ int main(int argc, char *argv[]){
   Timer time(5.0f);
 
   while(!gameOver){
-    std::this_thread::sleep_for(std::chrono::milliseconds(500));//sleep so we use less of the computers power
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));//sleep so we use less of the computers power
     
     #ifdef DEBUG 
     //std::cout << "update" << std::endl;
