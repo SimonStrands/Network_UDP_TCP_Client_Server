@@ -63,8 +63,8 @@ void printString(std::string str){
 HandleUser::HandleUser(int Socket){
     this->cSocket = Socket;
 
-    timeout.tv_sec = 10;
-    timeout.tv_usec = 500000;
+    timeout.tv_sec = 3;
+    timeout.tv_usec = 0;
     int so;
     if ((so = setsockopt (cSocket, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout))) < 0){
         DEBUG_MSG("couldn't make socket have a recv timeout : " << so);
@@ -74,7 +74,7 @@ HandleUser::HandleUser(int Socket){
     }
 }
 
-bool HandleUser::update(){
+updateReturn HandleUser::update(){
     memset(bufferData, 0, dataSize);
     char fileName[50];
     memset(fileName, 0, 50);
@@ -84,7 +84,12 @@ bool HandleUser::update(){
     if(recvSize < 1){
         DEBUG_MSG(bufferData);
         DEBUG_MSG("recv from client failed" << recvSize);
-        return false;
+        if(recvSize == 0){
+            return updateReturn::RecvZero;
+        }
+        else{
+            return updateReturn::RecvMinus;
+        }
     }
 
     inData = std::string(bufferData);
@@ -104,13 +109,13 @@ bool HandleUser::update(){
         }
         if(calls[c].substr(0,3) == "GET"){
             if(!handleGetCall(calls[c])){
-                return false;
+                return updateReturn::NoGet;
             }
         }
     }
     
 
-    return true;
+    return updateReturn::AllGood;
 }
 
 bool HandleUser::handleGetCall(const std::string &getCall){
@@ -149,15 +154,15 @@ bool HandleUser::handleGetCall(const std::string &getCall){
         sendError403();
         return false;
     }
-
-    char bufferData[1500];
+    static const int collectAndDataSize = 5000;
+    char fBufferData[collectAndDataSize];
     std::string sendData = "";
-    fileMutex.lock();
+    //fileMutex.lock();
     std::ifstream inFile(fileName, std::ios::out | std::ios::binary);
     if(!inFile){
         DEBUG_MSG("cannot open file");
         sendError404(fileName);
-        fileMutex.unlock();
+        //fileMutex.unlock();
         return false;
     }
     send200(httpV);
@@ -173,36 +178,32 @@ bool HandleUser::handleGetCall(const std::string &getCall){
     inFile.seekg(0);
 
     DEBUG_MSG("GOT FILE SIZE");
+    if(dataLeft < 1){
+        sendError403();
+        return false;
+    }
     
     //we don't read correctly
-    while(dataLeft > 1500){
-        memset(bufferData, 0, 1500);
-        inFile.read(bufferData, 1500);
-        sendData += bufferData;
-        dataLeft -= 1500;
+    while(dataLeft > collectAndDataSize){
+        memset(fBufferData, 0, collectAndDataSize);
+        inFile.read(fBufferData, collectAndDataSize);
+        if(send(cSocket, fBufferData, collectAndDataSize, MSG_NOSIGNAL) < 0){
+            DEBUG_MSG("couldn't send data");
+        }
+        dataLeft -= collectAndDataSize;
     }
     DEBUG_MSG("Read first size of file");
     if(dataLeft > 0){
-        char left[dataLeft];
-        memset(left, 0, dataLeft);
-        inFile.read(left, dataLeft);
-        sendData += left;
+        //dataLeft - 1?
+        inFile.read(fBufferData, dataLeft);
+        if(send(cSocket, fBufferData, dataLeft, MSG_NOSIGNAL) < 0){
+            DEBUG_MSG("couldn't send data");
+        }
     }
     DEBUG_MSG("read Second ");
     inFile.close();
-    fileMutex.unlock();
-    if(sendData.length() > 1){
-        sendData = sendData.substr(0, sendData.length() - 1);
-    }
-    //MSG_NOSIGNAL
-    if(sendData.length() == 0){
-        sendError403();
-    }
-    if(send(cSocket, sendData.c_str(), sendData.length(), MSG_NOSIGNAL) < 0){
-        DEBUG_MSG("couldn't send data");
-    }
+    //fileMutex.unlock();
     DEBUG_MSG("sentdata");
-
 
     return true;
 }

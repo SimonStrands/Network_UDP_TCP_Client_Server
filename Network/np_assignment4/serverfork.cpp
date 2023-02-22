@@ -27,7 +27,6 @@ void HandleWarnings(int e, std::string warningMSG){
 }
 
 void WaitForFork(){
-  //wait for all processes to be done
   int status = 0;
   pid_t wpid;
   while ((wpid = wait(&status)) > 0);
@@ -37,12 +36,28 @@ void HandleUserFork(int socket){
   DEBUG_MSG("handling user");
   HandleUser client(socket);
   bool stop = false;
-  client.update();
+  updateReturn r = client.update();
+  if(r != updateReturn::AllGood){
+    switch (r) {
+    case RecvZero:
+      std::cout << "recv 0" << std::endl;
+    break;
+    case RecvMinus:
+      std::cout << "recv minus" << std::endl;
+    break;
+    case NoGet:
+      std::cout << "didn't get anything" << std::endl;
+    break;
+    default:
+    break;
+    }
+  }
   return;
 }
 
 
 int main(int argc, char *argv[]){
+  std::cout << "Forked server" << std::endl;
   bool gameOver = false;
   std::string PORT = "5000";  // 5000 is standard for this server
   std::string ipaddress = "0.0.0.0"; //take what is avalible

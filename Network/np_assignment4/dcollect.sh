@@ -6,6 +6,8 @@ portTHREAD=8282
 testing=0
 forkTime=0
 threadTime=0
+smallforkTime=0
+smallthreadTime=0
 
 head -c 10000 < /dev/urandom > big
 head -c 1000 < /dev/urandom > small 
@@ -108,10 +110,10 @@ echo ""
 
 echo "*** Performance forked server."
 echo " "
-#
+
 
 # Remove any performance data files.
-rm -rf perf_*.txt
+rm -rf perf_Fork_*.txt
 SECONDS=0
 for ((i=1;i<CONCURRENCY;i++)); do
     for ((k=1;k<REPEAT;k++)); do
@@ -123,13 +125,13 @@ for ((i=1;i<CONCURRENCY;i++)); do
 	    echo "ERROR: Check server on http://127.0.0.1:$portFORK/big "
 	    exit 1
 	fi
-	echo "$value" >> "perf_$i.txt" ;
+	echo "$value" >> "perf_Fork_$i.txt" ;
     done;
     echo "Done all repetitions for $i, doing statistics (with awk). "
     statistics=$(awk '{for(i=1;i<=NF;i++) {sum[i] += $i; sumsq[i] += ($i)^2}} 
           END {for (i=	     1;i<=NF;i++) { 
           printf "%f %f \n", sum[i]/NR, sqrt((sumsq[i]-sum[i]^2/NR)/NR)}
-         }' perf_$i.txt)
+         }' perf_Fork_$i.txt)
     echo "$i => $statistics " | tee -a statistics_fork.log
 done
 forkTime=$SECONDS
@@ -152,24 +154,29 @@ echo " "
 
 SECONDS=0
 ## Remove any performance data files. 
-rm -rf perf_*.txt
+rm -rf perf_Thread_*.txt
 for ((i=1;i<CONCURRENCY;i++)); do
     for ((k=1;k<REPEAT;k++)); do
-	bonkers=$(ab -n 10000 -c $i http://127.0.0.1:$portTHREAD/big 2>/dev/null | grep 'Requests per second');
+	bonkers1=$(ab -n 10000 -c $i http://127.0.0.1:$portTHREAD/big 2>abErrorOut)
+    bonkers=$(echo "$bonkers1" | grep 'Requests per second');
 	value=$(echo "$bonkers" | awk '{print $4}');
 	echo "C=$i,$k => $value";
 	if [[ -z "$value" ]]; then
 	    echo "ERROR: No usefull data was collected from AB, this is an serious ISSUE."
 	    echo "ERROR: Check server on http://127.0.0.1:$portTHREAD/big "
-	    exit 1
+	    echo "bonkers: $bonkers1"
+        echo "_std::error"
+        cat abErrorOut
+        echo "//"
+        exit 1
 	fi
-	echo "$value" >> "perf_$i.txt" ;
+	echo "$value" >> "perf_Thread_$i.txt" ;
     done;
     echo "Done all repetitions for $i, doing statistics (with awk). "
     statistics=$(awk '{for(i=1;i<=NF;i++) {sum[i] += $i; sumsq[i] += ($i)^2}} 
           END {for (i=	     1;i<=NF;i++) { 
           printf "%f %f \n", sum[i]/NR, sqrt((sumsq[i]-sum[i]^2/NR)/NR)}
-         }' perf_$i.txt)
+         }' perf_Thread_$i.txt)
     echo "$i => $statistics " | tee -a statistics_thread.log
 done
 ##say how long time it took
@@ -187,8 +194,7 @@ else
     echo "Completed in $SECONDS seconds"
 fi
 
-
 gnuplot dcollect.p
 
 echo "SUMMARY: Did it work?"
-echo "ThreadTimer: $threadTime forkTimer: $forkTime"
+echo "ThreadTimer: $threadTime forkTimer: $forkTime smallThreadTimer: $smallthreadTime smallforkTimer: $smallforkTime"

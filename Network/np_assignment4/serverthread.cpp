@@ -25,19 +25,36 @@ void HandleWarnings(int e, std::string warningMSG){
   }
 }
 
-void HandleUserThread(int socket){
+void HandleUserThread(int socket, int& tRet){
   HandleUser client(socket);
   bool stop = false;
-  client.update();
+  updateReturn r = client.update();
+  if(r != updateReturn::AllGood){
+    switch (r) {
+    case RecvZero:
+      std::cout << "recv 0" << std::endl;
+    break;
+    case RecvMinus:
+      std::cout << "recv minus" << std::endl;
+    break;
+    case NoGet:
+      std::cout << "didn't get anything" << std::endl;
+    break;
+    default:
+      std::cout << "something went wrong" << std::endl;
+    break;
+    }
+  }
   shutdown(socket, SHUT_RDWR);
   close(socket);
   DEBUG_MSG("deleted client");
+  tRet = 2;
   return;
 }
 
 int main(int argc, char *argv[]){
   bool gameOver = false;
-  //DEBUG_MSG("Threaded SERVER");
+  std::cout << "Threaded SERVER 1.0" << std::endl;
   ThreadPool tPool;
   std::string PORT = "5000";  // 5000 is standard for this server
   std::string ipaddress = "0.0.0.0"; //take what is avalible
@@ -74,17 +91,33 @@ int main(int argc, char *argv[]){
   HandleError(bind(s_listen, addr->ai_addr, addr->ai_addrlen), "cannot bind socket");
 
   //start listening
-  const int MAXNROFCONNECTIONS = 7;
+  const int MAXNROFCONNECTIONS = 61;
   HandleError(listen(s_listen, MAXNROFCONNECTIONS), "cannot listen");
 
   socklen_t clientsSize = sizeof(sockaddr_in);
 
   while(!gameOver){
     sockaddr_in clientaddr;
-    int ClientSocket;
-    if((ClientSocket = accept(s_listen, (struct sockaddr*)&(clientaddr),(socklen_t*)&clientsSize)) >= 0){
-      //DEBUG_MSG("got a new client");
-      tPool.setJob(HandleUserThread, ClientSocket);
+
+    //wait until we have a thread
+    #if defined (NotPooled)
+      while (!tPool.HaveThread()) {};
+    #endif
+
+    int ClientSocket = accept(s_listen, (struct sockaddr*)&(clientaddr),(socklen_t*)&clientsSize);
+    if(ClientSocket >= 0){
+      DEBUG_MSG("got a new client");
+      #if defined (NotPooled)
+        if(!tPool.setJob(HandleUserThread, ClientSocket)){
+          std::cout << "couldn't set job" << std::endl;
+          exit(-1);
+        }
+      #else
+        tPool.setJob(HandleUserThread, ClientSocket);
+      #endif
+    }
+    else{
+      std::cout << "couldn't accept socket "  << ClientSocket << std::endl;
     }
   }
 

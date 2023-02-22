@@ -21,10 +21,12 @@
 
 static std::mutex fileMutex;
 
+enum updateReturn { AllGood, RecvZero, RecvMinus, NoGet};
+
 class HandleUser{
 public:
     HandleUser(const int Socket);
-    bool update();
+    updateReturn update();
 private:
     int cSocket;
     std::string inData;

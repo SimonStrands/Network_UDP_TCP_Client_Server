@@ -23,7 +23,7 @@ serverthread: $(serverthread_OBJ)
 	$(CXX) -L./ -Wall -o serverthread $(serverthread_OBJ) -lpthread -I.
 
 Test: $(Test_OBJ)
-	$(CXX) -L./ -Wall -o Test $(Test_OBJ) -I.
+	$(CXX) -L./ -Wall -o Test $(Test_OBJ) -lpthread -I.
 
 clean:
 	rm *.o *.a perf_*.txt  tmp.* serverfork serverthread
