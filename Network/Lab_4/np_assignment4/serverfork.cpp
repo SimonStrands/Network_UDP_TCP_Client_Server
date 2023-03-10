@@ -10,6 +10,8 @@
 #include <vector>
 /* You will to add includes here */
 #include "HandleUser.h"
+#include <sys/wait.h>
+
 
 void HandleError(int e, std::string errorMSG){
   if(e < 0){
@@ -20,31 +22,56 @@ void HandleError(int e, std::string errorMSG){
 
 void HandleWarnings(int e, std::string warningMSG){
   if(e < 0){
-    std::cout << warningMSG << std::endl; 
+    DEBUG_MSG(warningMSG); 
   }
 }
 
-void HandleUserFork(int& socket){
-  std::cout << "handling user" << std::endl;
+void WaitForFork(){
+  int status = 0;
+  pid_t wpid;
+  while ((wpid = wait(&status)) > 0);
+}
+
+void HandleUserFork(int socket){
+  DEBUG_MSG("handling user");
   HandleUser client(socket);
   bool stop = false;
-  //while(!stop){
-  client.update();
-  //}
+  updateReturn r = client.update();
+  if(r != updateReturn::AllGood){
+    switch (r) {
+    case RecvZero:
+      std::cout << "recv 0" << std::endl;
+    break;
+    case RecvMinus:
+      std::cout << "recv minus" << std::endl;
+    break;
+    case NoGet:
+      std::cout << "didn't get anything" << std::endl;
+    break;
+    default:
+    break;
+    }
+  }
   return;
 }
 
+
 int main(int argc, char *argv[]){
+  std::cout << "Forked server" << std::endl;
   bool gameOver = false;
   std::string PORT = "5000";  // 5000 is standard for this server
   std::string ipaddress = "0.0.0.0"; //take what is avalible
 
   if(argc > 1){
-    char delim[]=":";
-    char* serverIP = strtok(argv[1], delim); 
-    ipaddress = serverIP;
-    char* serverPort = strtok(NULL, delim);
-    PORT = serverPort;
+    std::string ipAndPort = argv[1];
+    bool done = false;
+    for(int i = ipAndPort.size(); i > 0 && !done; i--){
+      if(ipAndPort[i] == ':'){
+        done = true;
+        ipaddress = ipAndPort.substr(0, i);
+        PORT = ipAndPort.substr(i+1, ipAndPort.size() - i);
+      }
+    }
   }
 
   struct addrinfo hints = {};
@@ -73,43 +100,45 @@ int main(int argc, char *argv[]){
 
   socklen_t clientsSize = sizeof(sockaddr_in);
 
-  int nrOfForks = 0;
-
   while(!gameOver){
     int ClientSocket;
-    sockaddr_in clientaddr;
-    if((ClientSocket = accept(s_listen, (struct sockaddr*)&(clientaddr),(socklen_t*)&clientsSize)) >= 0){
+    sockaddr clientaddr;
+    if((ClientSocket = accept(s_listen, &clientaddr,(socklen_t*)&clientsSize)) >= 0){
       pid_t fork_ID = -1;
       uint8_t tries = 0;
-      std::cout << "got a connection" << std::endl;
+      DEBUG_MSG("got a connection");
       while(fork_ID < 0 && tries < 20){
         fork_ID = fork();
         if(fork_ID == 0){
-          std::cout << "created new fork process C" << std::endl;
+          DEBUG_MSG("created new fork process C");
           HandleUserFork(ClientSocket);
-          std::cout << "closing socket" << std::endl;
+          DEBUG_MSG("closing socket");
           shutdown(ClientSocket, SHUT_RDWR);
           close(ClientSocket);
-          std::cout << "closed socket" << std::endl;
+          DEBUG_MSG("closed socket");
           exit(EXIT_SUCCESS);
           return 1;
         }
         else if(fork_ID > 0){
-          nrOfForks++;
-          std::cout << "created new fork process P" << std::endl;
+          close(ClientSocket);
+          DEBUG_MSG("created new fork process P");
         }
         else if(fork_ID < 0){
-          std::cout << "couldn't create new fork: " << fork_ID << std::endl;
+          DEBUG_MSG("couldn't create new fork: " << fork_ID);
           tries += 1;
-          usleep(500000);
+          WaitForFork();
           if(tries < 20){
-            std::cout << "trying again" << std::endl;
+            DEBUG_MSG("trying again");
           }
           else{
-            std::cout << "nr of forks got to: " << nrOfForks << std::endl;
+            DEBUG_MSG("nr of forks got to: ");
           }
         }
       }
+    }
+    else{
+      std::cout << "cannot create socket" << std::endl;
+      exit(-1);
     }
   }
 

@@ -7,6 +7,21 @@
 static const std::string errorCode400 = "HTTP/x.x 400 Unknown Protocol\r\n\r\n";
 static const std::string errorCode404 = " 404 Not Found\r\n\r\n";
 
+bool SetSocketBlockingEnabled(int fd, bool blocking)
+{
+   if (fd < 0) return false;
+
+#ifdef _WIN32
+   unsigned long mode = blocking ? 0 : 1;
+   return (ioctlsocket(fd, FIONBIO, &mode) == 0) ? true : false;
+#else
+   int flags = fcntl(fd, F_GETFL, 0);
+   if (flags == -1) return false;
+   flags = blocking ? (flags & ~O_NONBLOCK) : (flags | O_NONBLOCK);
+   return (fcntl(fd, F_SETFL, flags) == 0) ? true : false;
+#endif
+}
+
 void printString(std::string str){
     for (const char* p = str.c_str(); *p != '\0'; ++p)
     {
@@ -45,33 +60,38 @@ void printString(std::string str){
     std::cout << "\n\n" << std::endl;
 }
 
-HandleUser::HandleUser(int cSocket){
-    this->cSocket = cSocket;
+HandleUser::HandleUser(int Socket){
+    this->cSocket = Socket;
 
     timeout.tv_sec = 3;
     timeout.tv_usec = 0;
-    
-    if (setsockopt (cSocket, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) < 0){
-        std::cout << "couldn't make socket have a recv timeout" << std::endl;
+    int so;
+    if ((so = setsockopt (cSocket, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout))) < 0){
+        DEBUG_MSG("couldn't make socket have a recv timeout : " << so);
     }
-    if (setsockopt (cSocket, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout)) < 0){
-        std::cout << "couldn't make socket have a send timeout" << std::endl;
+    if ((so = setsockopt (cSocket, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout))) < 0){
+        DEBUG_MSG("couldn't make socket have a send timeout : " << so);
     }
 }
 
-bool HandleUser::update(){
+updateReturn HandleUser::update(){
     memset(bufferData, 0, dataSize);
     char fileName[50];
     memset(fileName, 0, 50);
-    std::cout << "waiting for recv" << std::endl;
-    if(recv(this->cSocket, &bufferData, sizeof(bufferData), 0) < 1){
-        std::cout << bufferData << std::endl;
-        std::cout << "recv from client failed" << std::endl;
-        return false;
+    DEBUG_MSG("waiting for recv");
+    int recvSize = 0;
+    recvSize = recv(this->cSocket, &bufferData, dataSize, 0);
+    if(recvSize < 1){
+        DEBUG_MSG(bufferData);
+        DEBUG_MSG("recv from client failed" << recvSize);
+        if(recvSize == 0){
+            return updateReturn::RecvZero;
+        }
+        else{
+            return updateReturn::RecvMinus;
+        }
     }
-    else{
-        std::cout << "recv from server" << std::endl;
-    }
+
     inData = std::string(bufferData);
     //cut them by calls
     char delimiter = '\n';
@@ -83,23 +103,19 @@ bool HandleUser::update(){
     }
     calls.push_back(inData);
 
-    for(int i = 0; i < calls.size(); i++){
-        std::cout << "call " << i << ": " << calls[i] << std::endl;
-    }
-
     for(int c = 0; c < calls.size(); c++){
         if(calls[c].size() < 1){
             continue;
         }
         if(calls[c].substr(0,3) == "GET"){
             if(!handleGetCall(calls[c])){
-                return false;
+                return updateReturn::NoGet;
             }
         }
     }
     
 
-    return false;
+    return updateReturn::AllGood;
 }
 
 bool HandleUser::handleGetCall(const std::string &getCall){
@@ -110,7 +126,7 @@ bool HandleUser::handleGetCall(const std::string &getCall){
         }
     }
     if(nrOfSlashes > 3){
-        std::cout << "to many slashes:" << nrOfSlashes << std::endl;
+        DEBUG_MSG("to many slashes:" << nrOfSlashes);
         sendError400();
         return false;
     }
@@ -133,26 +149,24 @@ bool HandleUser::handleGetCall(const std::string &getCall){
     }
     
     if(httpV != "HTTP/1.1" && httpV != "HTTP/1.0"){
-        std::cout << "error: file name: " << fileName << std::endl;
-        std::cout << "error: http version: " << httpV << std::endl;
+        DEBUG_MSG("error: file name: " << fileName);
+        DEBUG_MSG("error: http version: " << httpV);
         sendError403();
         return false;
     }
-    std::cout << "file name: " << fileName << std::endl;
-    std::cout << "http version: " << httpV << std::endl;
-
-    //std::ifstream inFile(fileName, std::ios::out | std::ios::binary);
+    static const int collectAndDataSize = 5000;
+    char fBufferData[collectAndDataSize];
+    std::string sendData = "";
+    //fileMutex.lock();
     std::ifstream inFile(fileName, std::ios::out | std::ios::binary);
     if(!inFile){
-        std::cout << "cannot open file" << std::endl;
+        DEBUG_MSG("cannot open file");
         sendError404(fileName);
+        //fileMutex.unlock();
         return false;
     }
     send200(httpV);
-    std::cout << "got file!" << std::endl;
-
-    char bufferData[1500];
-    std::string sendData = "";
+    DEBUG_MSG("got file!");
     
     inFile.ignore( std::numeric_limits<std::streamsize>::max() );
     std::streamsize length = inFile.gcount();
@@ -162,33 +176,40 @@ bool HandleUser::handleGetCall(const std::string &getCall){
     int dataLeft = fileSize;
     inFile.clear();
     inFile.seekg(0);
-    std::cout << "file size: " << fileSize << std::endl;
+
+    DEBUG_MSG("GOT FILE SIZE");
+    if(dataLeft < 1){
+        sendError403();
+        return false;
+    }
     
     //we don't read correctly
-    while(dataLeft > 1500){
-        memset(bufferData, 0, 1500);
-        inFile.read(bufferData, 1500);
-        sendData += bufferData;
-        dataLeft -= 1500;
+    while(dataLeft > collectAndDataSize){
+        memset(fBufferData, 0, collectAndDataSize);
+        inFile.read(fBufferData, collectAndDataSize);
+        if(send(cSocket, fBufferData, collectAndDataSize, MSG_NOSIGNAL) < 0){
+            DEBUG_MSG("couldn't send data");
+        }
+        dataLeft -= collectAndDataSize;
     }
+    DEBUG_MSG("Read first size of file");
     if(dataLeft > 0){
-        char left[dataLeft];
-        memset(left, 0, dataLeft);
-        inFile.read(left, dataLeft);
-        sendData += left;
+        //dataLeft - 1?
+        inFile.read(fBufferData, dataLeft);
+        if(send(cSocket, fBufferData, dataLeft, MSG_NOSIGNAL) < 0){
+            DEBUG_MSG("couldn't send data");
+        }
     }
+    DEBUG_MSG("read Second ");
     inFile.close();
-    sendData = sendData.substr(0, sendData.length() - 2);
-    if(send(cSocket, sendData.c_str(), sendData.length(), 0) < 0){
-        std::cout << "couldn't send data" << std::endl;
-    }
-
+    //fileMutex.unlock();
+    DEBUG_MSG("sentdata");
 
     return true;
 }
 
 void HandleUser::send200(const std::string& httpV){
-    std::cout << "send ok 200" << std::endl;
+    DEBUG_MSG("send ok 200");
     std::string okSend = httpV + " 200 OK\r\n\r\n";
     send(cSocket, okSend.c_str(), okSend.length(), 0);
 }

@@ -14,11 +14,19 @@
 #include <string.h>//For strtok
 #include <iostream>
 #include <fcntl.h>
+#include <mutex>
+
+//#define DEBUG_MSG(str) do { std::cout << str << std::endl; } while( false )
+#define DEBUG_MSG(str) do { } while ( false )
+
+static std::mutex fileMutex;
+
+enum updateReturn { AllGood, RecvZero, RecvMinus, NoGet};
 
 class HandleUser{
 public:
-    HandleUser(int cSocket);
-    bool update();
+    HandleUser(const int Socket);
+    updateReturn update();
 private:
     int cSocket;
     std::string inData;

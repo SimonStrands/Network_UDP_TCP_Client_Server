@@ -1,3 +1,4 @@
+#include <bits/stdint-uintn.h>
 #include <netinet/in.h>
 #include <stdio.h>
 #include <string.h>
@@ -17,6 +18,7 @@
 #include <thread>//just for sleep
 #include <string.h>//For strtok
 #include <vector>
+#include <regex>
 
 
 // Enable if you want debugging to be printed, see examble below.
@@ -26,29 +28,14 @@
 static std::string errorReason;
 
 bool checkIllegalName(std::string name){
-  //CHECK NAME
-  static const int illegal[] = {
-    96,94,93,91
-  };
-  if(name.length() > 12){
-    std::cout << "name can only be max of 12 characters" << std::endl;
-    errorReason = "name can only be max of 12 characters";
-    return false;
-  }
-  for(int i =  0; i < name.length(); i++){
-    if((name[i] < 48 || name[i] > 122) || (name[i] > 57 && name[i] < 65)){
-      std::cout << "cannot use " << name[i] << " in name" << std::endl;
-      errorReason = "cannot use " + std::to_string(name[i]) + "in name";
-      return false;
-    }
-    for(int x = 0; x < 4; x++){
-      if(name[i] == illegal[x]){
-        std::cout << "cannot use " << name[i] << " in name" << std::endl;
-        errorReason = "cannot use " + std::to_string(name[i]) + "in name";
-        return false;
+  static const std::regex reg("[^A-Za-z0-9\_]");
+  std::smatch mathes;
+  std::smatch matches;
+  while(std::regex_search(name, matches, reg)){
+      if(matches.size() > 0){
+          std::cout << name << " is not a valid name" << std::endl << matches.suffix().str() << std::endl;
+          return false;
       }
-    }
-    
   }
   return true;
 }
@@ -84,7 +71,7 @@ void HandleWarnings(int e, std::string warningMSG){
 
 struct clientStruct{
   int clientSocket;
-  sockaddr_in clientaddr;
+  sockaddr clientaddr;
   std::string name;
   clientStruct(){
     clientSocket = -1;
@@ -98,11 +85,17 @@ int main(int argc, char *argv[]){
   std::string ipaddress = "0.0.0.0"; //take what is avalible
 
   if(argc > 1){
-    char delim[]=":";
-    char* serverIP = strtok(argv[1], delim); 
-    ipaddress = serverIP;
-    char* serverPort = strtok(NULL, delim);
-    PORT = serverPort;
+    std::string ipAndPort = argv[1];
+
+    //get last ':' in string and that is the port
+    bool done = false;
+      for(int i = ipAndPort.size(); i > 0 && !done; i--){
+        if(ipAndPort[i] == ':'){
+        done = true;
+        ipaddress = ipAndPort.substr(0, i);
+        PORT = ipAndPort.substr(i+1, ipAndPort.size() - i);
+      }
+    }
   }
 
   //data
@@ -156,29 +149,50 @@ int main(int argc, char *argv[]){
       clients.push_back(clientStruct());
       std::cout << "an error would have happend" << std::endl;
     }
-
     //listen to new connection
     if((clients[clients.size() - 1].clientSocket = accept(
       s_listen, 
       (struct sockaddr*)&(clients[clients.size() - 1].clientaddr), 
       (socklen_t*)&clientsSize)) >= 0){
+        clientsSize = sizeof(sockaddr_in);
         //add new connection
-        std::cout << "got a new client" << std::endl;
+        if(clients[clients.size()-  1].clientaddr.sa_family == AF_INET){
+          //ipv4
+          char str[INET_ADDRSTRLEN];
+          uint16_t port = htons(((sockaddr_in*)&clients[clients.size()-  1].clientaddr)->sin_port);
+          inet_ntop( AF_INET, &((sockaddr_in*)&clients[clients.size()-  1].clientaddr)->sin_addr, str, INET_ADDRSTRLEN );
+          std::cout << "Client connected from " << str << ":" << port << std::endl;
+        }
+        else if(clients[clients.size()-  1].clientaddr.sa_family == AF_INET6){
+          //ipv6
+          char str[INET6_ADDRSTRLEN];
+          uint16_t port = htons(((sockaddr_in6*)&clients[clients.size()-  1].clientaddr)->sin6_port);
+          inet_ntop(AF_INET6, &((sockaddr_in6*)&clients[clients.size()-  1].clientaddr)->sin6_addr, str, INET6_ADDRSTRLEN );
+          std::cout << "Client connected from " << str << ":" << port << std::endl;
+        }
+        else{
+          std::cout << "not ipv4 or ipv6" << std::endl;
+        }
         SetSocketBlockingEnabled(clients[clients.size() - 1].clientSocket, false);
         //send hello and version
         send(clients[clients.size() - 1].clientSocket, version.c_str(), version.length(), 0);
+        std::cout << clients[clients.size() - 1].name << std::endl;
+
         clients.push_back(clientStruct());
+        
       }
     
     //check if clients have sent something
     for(int i = 0; i < clients.size() - 1; i++){
       dataRecvSize = 0;
       memset(bufferData, 0, dataSize);
-      dataRecvSize = read(clients[i].clientSocket, bufferData, dataSize);
+      dataRecvSize = recv(clients[i].clientSocket, bufferData, dataSize, 0);
+      
       
       if(dataRecvSize > 0){
+        std::cout << "recv: " << bufferData << std::endl;
         std::string buffdataStr(bufferData);
-        std::cout << "recved: " << bufferData << std::endl;
+        //std::cout << "recved: " << bufferData << std::endl;
         //check if it's a new client with nick
         if(buffdataStr.substr(0,4) == "NICK"){
           if(clients[i].name == "Ä"){
@@ -190,6 +204,7 @@ int main(int argc, char *argv[]){
             }
             else{
               //send error and remove client
+              std::cout << "d2.2" << std::endl;
               std::string errorMSG = ErrorSend + errorReason;
               send(clients[i].clientSocket, errorMSG.c_str(), errorMSG.length(), 0);
               std::cout << "removing user " <<  clients[i].name << std::endl;
@@ -204,7 +219,8 @@ int main(int argc, char *argv[]){
           //check if nick is usable
           if(clients[i].name == "Ä"){
             //send err beacuse client has not been set before nick is set
-            send(clients[i].clientSocket, ErrorSend.c_str(), ErrorSend.length(), 0);
+            std::string errorMSG = ErrorSend + ", No name is set";
+            send(clients[i].clientSocket, errorMSG.c_str(), errorMSG.length(), 0);
             std::cout << "removing user " <<  clients[i].name << std::endl;
             close(clients[i].clientSocket);
             clients.erase(clients.begin() + i);
@@ -219,6 +235,9 @@ int main(int argc, char *argv[]){
               send(clients[c].clientSocket, sendData.c_str(), sendData.length(), MSG_DONTWAIT);
             }
           }
+        }
+        else{
+          send(clients[i].clientSocket, ErrorSend.c_str(), ErrorSend.length(), 0);
         }
       }
       else if(dataRecvSize == 0){

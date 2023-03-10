@@ -84,33 +84,42 @@ void calcTheProtocol(calcProtocol& calcprotol)
   switch (calcprotol.arith)
   {
   case 1:
+    printf("add %d %d", calcprotol.inValue1, calcprotol.inValue2);
     calcprotol.inResult = calcprotol.inValue1 + calcprotol.inValue2;
     break;
   case 2:
+    printf("sub %d %d", calcprotol.inValue1, calcprotol.inValue2);
     calcprotol.inResult = calcprotol.inValue1 - calcprotol.inValue2;
     break;
   case 3:
+    printf("mul %d %d", calcprotol.inValue1, calcprotol.inValue2);
     calcprotol.inResult = calcprotol.inValue1 * calcprotol.inValue2;
     break;
   case 4:
+    printf("div %d %d", calcprotol.inValue1, calcprotol.inValue2);
     calcprotol.inResult = calcprotol.inValue1 / calcprotol.inValue2;
     break;
   case 5:
+    printf("fadd %.6f %.6f", calcprotol.flValue1, calcprotol.flValue2);
     calcprotol.flResult = calcprotol.flValue1 + calcprotol.flValue2;
     break;
   case 6:
+    printf("fsub %.6f %.6f", calcprotol.flValue1, calcprotol.flValue2);
     calcprotol.flResult = calcprotol.flValue1 - calcprotol.flValue2;
     break;
   case 7:
+    printf("fmul %.6f %.6f", calcprotol.flValue1, calcprotol.flValue2);
     calcprotol.flResult = calcprotol.flValue1 * calcprotol.flValue2;
     break;
   case 8:
+    printf("fdiv %.6f %.6f", calcprotol.flValue1, calcprotol.flValue2);
     calcprotol.flResult = calcprotol.flValue1 / calcprotol.flValue2;
     break;
   default:
     std::cout << "didn't get the right arith" << std::endl;
     break;
   }
+  printf("\n");
 }
 
 bool checkAnswear(calcProtocol& serverProtocol, calcProtocol& clientProtocol){
@@ -118,9 +127,13 @@ bool checkAnswear(calcProtocol& serverProtocol, calcProtocol& clientProtocol){
     //an int 
     return serverProtocol.inResult == clientProtocol.inResult;
   }
-  else{
+  else if(serverProtocol.arith < 9){
     //an float
     return abs(serverProtocol.flResult - clientProtocol.flResult) < 0.001f;
+  }
+  else{
+    std::cout << "didn't get the right arith" << std::endl;
+    return false;
   }
 }
 
@@ -142,7 +155,8 @@ bool SetSocketBlockingEnabled(int fd, bool blocking)
 }
 
 struct clientsStruct{
-  sockaddr_in clientSockAddr;
+  bool ipv6;
+  sockaddr clientSockAddr;
   calcProtocol theCalcProtocol;
   std::chrono::steady_clock::time_point startingLifePoint;
 };
@@ -153,30 +167,49 @@ void createNewProtocol(calcProtocol& prot, uint32_t id){
   prot.minor_version = 0;
   prot.id = id;
   prot.arith = rand() % 8 + 1;
-  prot.inValue1 = rand() % 500;
-  prot.inValue2 = rand() % 500;
+  prot.inValue1 = randomInt();
+  prot.inValue2 = randomInt();
   //prot.inValue do not calc now
-  prot.flValue1 = rand() % 500;
-  prot.flValue2 = rand() % 500;
+  prot.flValue1 = randomFloat();
+  prot.flValue2 = randomFloat();
   //prot.flResult do not calc now
 }
 
-int userExist(std::vector<clientsStruct>& clients, sockaddr_in& aClient, uint32_t clientID)
+int userExist(std::vector<clientsStruct>& clients, sockaddr& aClient, uint32_t clientID)
 {
   int theReturn = -1;
-  std::cout << "size of clients:" << clients.size() << std::endl;
   for(size_t i = 0; i < clients.size(); i++){
-    if(inet_ntoa(aClient.sin_addr) == inet_ntoa(clients[i].clientSockAddr.sin_addr) && 
-      aClient.sin_port == clients[i].clientSockAddr.sin_port &&
-      clientID == clients[i].theCalcProtocol.id)
-    {
-      return i;
+    if(clients[i].ipv6 == (aClient.sa_family == AF_INET6)){
+      if(!clients[i].ipv6){
+        char ip[INET_ADDRSTRLEN];
+        char clientIP[INET_ADDRSTRLEN];
+        inet_ntop(AF_INET, &((sockaddr_in*)&clients[i].clientSockAddr)->sin_addr, clientIP, INET_ADDRSTRLEN);
+        inet_ntop(AF_INET, &((sockaddr_in*)&aClient)->sin_addr, ip, INET_ADDRSTRLEN);
+
+
+        if(std::string(ip) == std::string(clientIP) && 
+          ((sockaddr_in*)&aClient)->sin_port == ((sockaddr_in*)&clients[i].clientSockAddr)->sin_port &&
+          clientID == clients[i].theCalcProtocol.id)
+        {
+          return i;
+        }
+
+      }
+      else{
+        char ip[INET6_ADDRSTRLEN];
+        char clientIP[INET6_ADDRSTRLEN];
+        inet_ntop(AF_INET, &((sockaddr_in6*)&clients[i].clientSockAddr)->sin6_addr, clientIP, INET_ADDRSTRLEN);
+        inet_ntop(AF_INET, &((sockaddr_in6*)&aClient)->sin6_addr, ip, INET6_ADDRSTRLEN);
+
+
+        if(std::string(ip) == std::string(clientIP) && 
+          ((sockaddr_in6*)&aClient)->sin6_port == ((sockaddr_in6*)&clients[i].clientSockAddr)->sin6_port &&
+          clientID == clients[i].theCalcProtocol.id)
+        {
+          return i;
+        }
+      }
     }
-  }
-  std::cout << "user didn't exist, sind_addr: "<< inet_ntoa(aClient.sin_addr) << ":" << aClient.sin_port << std::endl;
-  std::cout << "existing users:" << std::endl;
-  for(size_t i = 0; i < clients.size(); i++){
-    std::cout << inet_ntoa(clients[i].clientSockAddr.sin_addr) << ":" << clients[i].clientSockAddr.sin_port << std::endl;
   }
   return theReturn;
 }
@@ -187,7 +220,6 @@ void updateUserTime(std::vector<clientsStruct>& clients)
     std::chrono::duration<double> runTime = std::chrono::steady_clock::now() - clients[i].startingLifePoint;
     if((float)runTime.count() >= 10.0f){
       clients.erase(clients.begin() + i);
-      std::cout << "erased user" << std::endl;
       i--;
     }
   }
@@ -199,6 +231,7 @@ void userAnsweard(clientsStruct &client){
 
 int main(int argc, char *argv[]){
 
+  initCalcLib();
   bool gameOver = false;
   std::vector<clientsStruct> clients;
   uint32_t id = 0;
@@ -222,13 +255,16 @@ int main(int argc, char *argv[]){
   //set ip address and port of server
   std::string PORT = "5000";  // 5000 is standard for this server
   std::string ipaddress = "0.0.0.0"; //take what is avalible
-
   if(argc > 1){
-    char delim[]=":";
-    char* serverIP = strtok(argv[1], delim); 
-    ipaddress = serverIP;
-    char* serverPort = strtok(NULL, delim);
-    PORT = serverPort;
+    std::string ipAndPort = argv[1];
+    bool done = false;
+    for(int i = ipAndPort.size(); i > 0 && !done; i--){
+      if(ipAndPort[i] == ':'){
+        done = true;
+        ipaddress = ipAndPort.substr(0, i);
+        PORT = ipAndPort.substr(i+1, ipAndPort.size() - i);
+      }
+    }
   }
 
   struct addrinfo hints = {};
@@ -260,23 +296,29 @@ int main(int argc, char *argv[]){
     return rc;
   }
   while (!gameOver){
-    socklen_t len = sizeof(struct sockaddr_in);
-    sockaddr_in tempClientAddr = {0};
+    socklen_t len = sizeof(struct sockaddr_in6);
+    sockaddr tempClientAddr;
 
     sizeofRecv = recvfrom(
     sock, 
     p_struct, 
     sizeof(calcProtocol), 
     0, 
-    (sockaddr*)&tempClientAddr, 
+    &tempClientAddr,
     &len
     );
+    if(tempClientAddr.sa_family == AF_INET){
+      len = sizeof(struct sockaddr_in);
+    }
+    else{
+      len = sizeof(struct sockaddr_in6);
+    }
+
     updateUserTime(clients);
     
     int currentUser = -1;
     //check what type we got
     if(sizeofRecv == sizeof(calcProtocol)){
-      std::cout << "got a calcprotocol" << std::endl;
       recvCalcProtocol = *(calcProtocol*)p_struct;
       recvCalcProtocolConverter(recvCalcProtocol);
       currentUser = userExist(clients, tempClientAddr, recvCalcProtocol.id);
@@ -287,7 +329,8 @@ int main(int argc, char *argv[]){
           sock, 
           &errorMsg, 
           sizeof(calcMessage), 0, 
-          (sockaddr*)&tempClientAddr,
+          //(sockaddr*)&tempClientAddr,
+          &tempClientAddr,
           len
         );
       }
@@ -295,16 +338,17 @@ int main(int argc, char *argv[]){
         //if we have user check what so the user send the right answear
         if(checkAnswear(clients[currentUser].theCalcProtocol, recvCalcProtocol)){
           //send ok
+          std::cout << "OK" << std::endl;
           sendCalcMsg.type = 2;
           sendCalcMsg.message = 1;
           sendCalcMsg.protocol = 6;
           sendCalcMessageConverter(sendCalcMsg);
-          std::cout << "sending calcMessage ok" << std::endl;
           sizeofSend = sendto(
               sock, 
               &sendCalcMsg, 
               sizeof(calcMessage), 0, 
-              (sockaddr*)&tempClientAddr,
+              //(sockaddr*)&tempClientAddr,
+              &tempClientAddr,
               len
             );
         }
@@ -315,7 +359,8 @@ int main(int argc, char *argv[]){
               sock, 
               &errorMsg, 
               sizeof(calcMessage), 0, 
-              (sockaddr*)&tempClientAddr,
+              //(sockaddr*)&tempClientAddr,
+              &tempClientAddr,
               len
             );
         }
@@ -324,7 +369,6 @@ int main(int argc, char *argv[]){
     }
     else if(sizeofRecv == sizeof(calcMessage)){
       //check if we have this client before
-      std::cout << "user sent calcMessage" << std::endl;
       currentUser = userExist(clients, tempClientAddr, -1);
       bool creatingNewUser = false;
       if(currentUser == -1){
@@ -345,7 +389,8 @@ int main(int argc, char *argv[]){
               sock, 
               &errorMsg, 
               sizeof(calcMessage), 0, 
-              (sockaddr*)&tempClientAddr,
+              //(sockaddr*)&tempClientAddr,
+              &tempClientAddr,
               len
             );
             //return to while loop
@@ -354,8 +399,8 @@ int main(int argc, char *argv[]){
           //create user
           clients.push_back(clientsStruct());
           currentUser = clients.size() - 1;
-          clients[currentUser].clientSockAddr.sin_addr = tempClientAddr.sin_addr;
-          clients[currentUser].clientSockAddr.sin_port = tempClientAddr.sin_port;
+          clients[currentUser].ipv6 = tempClientAddr.sa_family == 10;//check if user uses ipv6 or ipv4
+          clients[currentUser].clientSockAddr = tempClientAddr;
           clients[currentUser].startingLifePoint = std::chrono::steady_clock::now();
 
           //create protocol to user
@@ -363,13 +408,20 @@ int main(int argc, char *argv[]){
 
       }
       sendCalcProtocolConverter(clients[currentUser].theCalcProtocol);
-      sizeofSend = sendto(
-      sock, 
-      &clients[currentUser].theCalcProtocol, 
-      sizeof(calcProtocol), 0, 
-      (sockaddr*)&clients[currentUser].clientSockAddr,
-      len
-      );
+        sizeofSend = sendto(
+        sock, 
+        &clients[currentUser].theCalcProtocol, 
+        sizeof(calcProtocol), 0, 
+        &tempClientAddr,
+        len
+        );
+
+      std::cout << "sent data to user : " << sizeofSend << std::endl;
+      std::cout << sizeof(clients[currentUser].theCalcProtocol) << std::endl;
+      std::cout << sizeof(tempClientAddr) << std::endl;
+      if(sizeofSend < 0){
+        std::cout << "couldn't send" << std::endl;
+      }
       recvCalcProtocolConverter(clients[currentUser].theCalcProtocol);
 
       if(creatingNewUser){
@@ -385,10 +437,6 @@ int main(int argc, char *argv[]){
       std::cout << "error" << std::endl;
     }
   }
-
-#ifdef DEBUG
-  printf("DEBUGGER LINE ");
-#endif
 
   close(sock);
   return 0;

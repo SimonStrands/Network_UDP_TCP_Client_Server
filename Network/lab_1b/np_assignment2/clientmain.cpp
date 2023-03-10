@@ -17,12 +17,9 @@
 #include <string>
 #include <iostream>
 #include <chrono>
- #include <fcntl.h>
-
+#include <fcntl.h>
 // Included to get the support library
 #include <calcLib.h>
-
-
 #include "protocol.h"
 
 #define PORT 4950
@@ -116,7 +113,10 @@ bool SetSocketBlockingEnabled(int fd, bool blocking)
 
 void HandleError(int e, std::string errorMSG){
   if(e < 1){
-    std::cout << errorMSG << std::endl; 
+    std::cout << errorMSG  << ":" << e << std::endl;
+    char buffer[ 256 ];
+    char * errorMsg = strerror_r( errno, buffer, 256 ); // GNU-specific version, Linux default
+    printf("Error %s\n", errorMsg);
     exit(e);
   }
 }
@@ -126,89 +126,114 @@ void calculate(calcProtocol &res, bool& intres ){
   {
   case 1:
     intres = true;
+    printf("add %d %d", res.inValue1, res.inValue2);
     res.inResult = res.inValue1 + res.inValue2;
-    std::cout << res.inValue1 << + " + " << res.inValue2 << " = " << res.inResult << std::endl;
     break;
   case 2:
     intres = true;
+    printf("sub %d %d", res.inValue1, res.inValue2);
     res.inResult = res.inValue1 - res.inValue2;
-    std::cout << res.inValue1 << + " - " << res.inValue2 << " = " << res.inResult << std::endl;
     break;
   case 3:
     intres = true;
+    printf("mul %d %d", res.inValue1, res.inValue2);
     res.inResult = res.inValue1 * res.inValue2;
-    std::cout << res.inValue1 << + " * " << res.inValue2 << " = " << res.inResult << std::endl;
     break;
   case 4:
     intres = true;
+    printf("div %d %d", res.inValue1, res.inValue2);
     res.inResult = res.inValue1 / res.inValue2;
-    std::cout << res.inValue1 << + " / " << res.inValue2 << " = " << res.inResult << std::endl;
     break;
   case 5:
     intres = false;
+    printf("fadd %.6f %.6f", res.flValue1, res.flValue2);
     res.flResult = res.flValue1 + res.flValue2;
-    std::cout << res.flValue1 << + " + " << res.flValue2 << " = " << res.flResult << std::endl;
     break;
   case 6:
     intres = false;
+    printf("fsub %.6f %.6f", res.flValue1, res.flValue2);
     res.flResult = res.flValue1 - res.flValue2;
-    std::cout << res.flValue1 << + " - " << res.flValue2 << " = " << res.flResult << std::endl;
     break;
   case 7:
     intres = false;
+    printf("fmul %.6f %.6f", res.flValue1, res.flValue2);
     res.flResult = res.flValue1 * res.flValue2;
-    std::cout << res.flValue1 << + " * " << res.flValue2 << " = " << res.flResult << std::endl;
     break;
   case 8:
     intres = false;
+    printf("fdiv %.6f %.6f", res.flValue1, res.flValue2);
     res.flResult = res.flValue1 / res.flValue2;
-    std::cout << res.flValue1 << + " / " << res.flValue2 << " = " << res.flResult << std::endl;
     break;
   default:
     std::cout << "didn't get the right arith" << std::endl;
     break;
   }
+  printf("\n");
 }
 
 int main(int argc, char *argv[]){
 
-  size_t sizeOfBuffer = 256;
-  char dataBuffer[sizeOfBuffer];
   int sizeOfRecv = 0;
   int sizeOfSend = 0;
 
-  //get ip address and port number from argv
-  char *ServerIP;
-  char delim[]=":";
+  std::string ServerIP;
+  std::string ServerPort;
   if(argc < 2){
-    std::string a = "13.53.76.30:5000";
-    char* ipandPort = new char[a.size() + 1];
-    std::copy(a.begin(), a.end(), ipandPort);
-    ServerIP=strtok(ipandPort,delim);
+    std::string ipAndPort = "13.53.76.30:5000";
+    bool done = false;
+    for(int i = ipAndPort.size(); i > 0 && !done; i--){
+      if(ipAndPort[i] == ':'){
+        done = true;
+        ServerIP = ipAndPort.substr(0, i);
+        ServerPort = ipAndPort.substr(i+1, ipAndPort.size() - i);
+      }
+    }
   }
   else{
-    ServerIP=strtok(argv[1],delim);
+    std::string ipAndPort = argv[1];
+    bool done = false;
+    for(int i = ipAndPort.size(); i > 0 && !done; i--){
+      if(ipAndPort[i] == ':'){
+        done = true;
+        ServerIP = ipAndPort.substr(0, i);
+        ServerPort = ipAndPort.substr(i+1, ipAndPort.size() - i);
+      }
+    }
   }
-  
-  char *ServerPort=strtok(NULL,delim);
-  int port = atoi(ServerPort);
 
   //write server ip and host to console/terminal
-  std::cout << "Server IP: " << ServerIP << " ServerPort: " << port << std::endl;
+  std::cout << "Host " << ServerIP << ", and port: " << ServerPort << std::endl;
 
-  int sock = socket(AF_INET, SOCK_DGRAM, 0);
+  struct addrinfo hints = {}, *res;
+  hints.ai_family = AF_UNSPEC;
+  hints.ai_socktype = SOCK_DGRAM;
+  hints.ai_protocol = IPPROTO_UDP;
+
+  if(getaddrinfo(ServerIP.c_str(), ServerPort.c_str(), &hints, &res) != 0){
+    return -1;
+  }
+
+  int sock = socket(res->ai_family, res->ai_socktype, 0);
+  #ifdef DEBUG 
   std::cout << "created socket" << std::endl;
+  #endif
   HandleError(sock, "cannot create socket");
 
-  sockaddr_in clientAddr;
-  sockaddr_in serverAddr;
-
-  socklen_t cLen = sizeof(clientAddr);
-
-  memset(&serverAddr, 0, sizeof(serverAddr));
-  serverAddr.sin_family = AF_INET;
-  serverAddr.sin_port = htons(port);
-  inet_pton(AF_INET, ServerIP, &serverAddr.sin_addr);
+  void* serverAddr;
+  socklen_t cLen;
+  socklen_t sLen;
+  if(res->ai_family == AF_INET){
+    serverAddr = (sockaddr_in*)res->ai_addr;
+    cLen = sizeof(sockaddr_in);
+    sLen = sizeof(sockaddr_in);
+    inet_pton(res->ai_family, ServerIP.c_str(), &((sockaddr_in*)serverAddr)->sin_addr);
+  }
+  else if(res->ai_family == AF_INET6){
+    serverAddr = (sockaddr_in6*)res->ai_addr;
+    cLen = sizeof(sockaddr_in6);
+    sLen = sizeof(sockaddr_in6);
+    inet_pton(res->ai_family, ServerIP.c_str(), &((sockaddr_in6*)serverAddr)->sin6_addr);
+  }
 
   //give buffer data som data
   calcMessage SendCalcMessage;
@@ -223,7 +248,6 @@ int main(int argc, char *argv[]){
   calcProtocol *recvCalcProtocol = new calcProtocol;
   calcMessage *recvCalcMessage = new calcMessage;
   void* p_struct = malloc(sizeof(calcProtocol)* 2);
-  size_t size = sizeof(recvCalcProtocol);
 
   //get message
   Timer time(2.0f);
@@ -232,34 +256,33 @@ int main(int argc, char *argv[]){
   SetSocketBlockingEnabled(sock, false);
   while (timesSent < 3 && !done)
   {
-    std::cout << "sending data to server" << std::endl;
-    sizeOfSend = sendto(sock, &SendCalcMessage, sizeof(calcMessage), 0, (sockaddr*)&serverAddr, sizeof(serverAddr));
+    
+    sizeOfSend = sendto(sock, &SendCalcMessage, sizeof(calcMessage), 0, (sockaddr*)serverAddr, sLen);
     HandleError(sizeOfSend, "we can't send");
-
     time.initNew(2.0f);
     timesSent++;
     
     while (!time.checkTime() && !done)
     {
-      sizeOfRecv = recvfrom(sock, recvCalcProtocol, sizeof(calcProtocol), 0, (sockaddr*)&serverAddr, &cLen);
+      sizeOfRecv = recvfrom(sock, recvCalcProtocol, sizeof(calcProtocol), 0, (sockaddr*)serverAddr, &cLen);
       if(sizeOfRecv != 0 && sizeOfRecv != -1)
       {
         done = true;
-        std::cout << "got data from server" << std::endl;
       }
     }
   }
-  
+
   if(sizeOfRecv == sizeof(calcMessage)){
-    std::cout << "got calcMessage sad" << std::endl;
+    std::cout << "Error got calcMessage expected calcprotocol" << std::endl;
     close(sock);
     return -1;
   }
   else if(sizeOfRecv == sizeof(calcProtocol)){
-    std::cout << "got a calcProtocol LETS GOOO!!!" << std::endl;
+    //continue
   }
   else{
-    std::cout << "didn't get any data from server" << std::endl;
+    close(sock);
+    HandleError(sizeOfRecv, "Error didn't get any data from server");
     return -1;
   }
 
@@ -269,15 +292,23 @@ int main(int argc, char *argv[]){
   recvCalcProtocolConverter(*recvCalcProtocol);
 
   calculate(*recvCalcProtocol, intres);
+  float fTheResult;
+  int iTheResult;
   if(intres){
-    std::cout << "sending: i " << recvCalcProtocol->inResult << std::endl;
+    #ifdef DEBUG 
+    std::cout << "Calculated the result to " << recvCalcProtocol->inResult << std::endl;
+    #endif
+    iTheResult = recvCalcProtocol->inResult;
   }
   else{
-    std::cout << "sending: f " << recvCalcProtocol->flResult << std::endl;
+    #ifdef DEBUG 
+    std::cout << "Calculated the result to " << recvCalcProtocol->flResult << std::endl;
+    #endif
+    fTheResult = recvCalcProtocol->flResult;
   }
   recvCalcProtocol->type = 2;
 
-  printCalcProto(*recvCalcProtocol);
+  //printCalcProto(*recvCalcProtocol);
 
   sendCalcProtocolConverter(*recvCalcProtocol);
 
@@ -288,30 +319,36 @@ int main(int argc, char *argv[]){
   done = false;
   while (timesSent < 3 && !done)
   {
-    std::cout << "sending data to server" << std::endl;
-    sizeOfSend = sendto(sock, recvCalcProtocol, sizeof(calcProtocol), 0, (sockaddr*)&serverAddr, sizeof(serverAddr));
-    HandleError(sizeOfSend, "we can't send");
+    sizeOfSend = sendto(sock, recvCalcProtocol, sizeof(calcProtocol), 0, (sockaddr*)serverAddr, sLen);
+    HandleError(sizeOfSend, "can't send data to server" + std::to_string(sizeOfSend));
 
     time.initNew(2.0f);
     timesSent++;
     
     while (!time.checkTime() && !done)
     {
-      sizeOfRecv = recvfrom(sock, recvCalcMessage, sizeof(calcMessage), 0, (sockaddr*)&serverAddr, &cLen);
+      sizeOfRecv = recvfrom(sock, recvCalcMessage, sizeof(calcMessage), 0, (sockaddr*)serverAddr, &cLen);
       if(sizeOfRecv != 0 && sizeOfRecv != -1)
       {
         done = true;
-        std::cout << "got data from server" << std::endl;
       }
     }
   }
   if(sizeOfRecv == sizeof(calcProtocol)){
     std::cout << "error got calcprotocol waited for calcMessage" << std::endl;
+    return -1;
   }
   else if(sizeOfRecv == sizeof(calcMessage)){
     recvCalcMessageConverter(*recvCalcMessage);
     if(recvCalcMessage->message == 1){
-      std::cout << "OK" << std::endl;
+      std::cout << "OK ";
+      std::cout << "(myresult=";
+      if(intres){
+        std::cout << iTheResult << ")"<< std::endl;
+      }
+      else{
+        std::cout << fTheResult << ")" << std::endl;
+      }
     }
     else if(recvCalcMessage->message == 2){
       std::cout << "NOT OK" << std::endl;
@@ -323,7 +360,6 @@ int main(int argc, char *argv[]){
 
   delete recvCalcProtocol;
   free(p_struct);
-
   close(sock);
 
   return 0;
